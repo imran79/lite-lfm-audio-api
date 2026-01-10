@@ -1,14 +1,14 @@
-# LFM Audio TTS API
+# Lite LFM Audio API 🎙️
+An easy way to run **Liquid AI's LFM 2.5 Audio model** on your own computer. No expensive GPUs needed!
 
-A FastAPI-based Text-to-Speech API using the [LiquidAI LFM2.5-Audio-1.5B](https://huggingface.co/LiquidAI/LFM2.5-Audio-1.5B) model with GGUF quantization for CPU inference.
+## What is this?
+It's a simple API that wraps the powerful LFM 2.5 model so you can use it just like any other web service.
 
-## Features
-
-- 🎙️ **Text-to-Speech**: Convert text to natural-sounding speech
-- 🌊 **SSE Streaming**: Real-time audio delivery via Server-Sent Events
-- 🗣️ **Multiple Voices**: Support for US/UK male/female voices
-- 🐳 **Docker Ready**: Easy deployment with Docker Compose
-- 💻 **CPU Only**: No GPU required - runs on GGUF quantized models
+- **Speak (TTS)**: Give it text, and it talks back.
+- **Listen (STT)**: Give it an audio file, and it types it out (using `faster-whisper`).
+- **Stream**: Get audio chunks in real-time (no waiting for the whole sentence).
+- **CPU Friendly**: Runs on standard computers thanks to GGUF quantization.
+- **Dockerized**: Just one command to start everything.
 
 ## API Endpoints
 
@@ -30,14 +30,16 @@ A FastAPI-based Text-to-Speech API using the [LiquidAI LFM2.5-Audio-1.5B](https:
   - `vocoder-LFM2.5-Audio-1.5B-Q4_0.gguf` (audio vocoder)
   - `tokenizer-LFM2.5-Audio-1.5B-Q4_0.gguf` (tokenizer)
 
-### Run with Docker
+### How to Run
+
+1.  Make sure you have [Docker](https://www.docker.com/) installed.
+2.  Run this command:
 
 ```bash
-# Build and start the container
 docker-compose up --build
-
-# The API will be available at http://localhost:8000
 ```
+
+That's it! The API is now listening at `http://localhost:8000`.
 
 ### API Documentation
 

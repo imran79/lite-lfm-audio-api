@@ -1,8 +1,8 @@
 """
-FastAPI SSE Text-to-Speech API using LFM2.5-Audio-1.5B GGUF model.
+Liquid AI LFM 2.5 Audio API
 
-This API provides text-to-speech conversion using the Liquid AI LFM2.5 model
-with Server-Sent Events (SSE) for streaming audio output.
+A simple, local API to run Liquid AI's LFM 2.5 Audio model. 
+It helps you convert text into speech (TTS) and speech back into text (STT) right on your CPU.
 """
 import os
 import base64
@@ -63,7 +63,7 @@ VOICE_PROMPTS = {
 stt_model = None
 
 def get_stt_model():
-    """Lazy load the STT model."""
+    """Load the Whisper model (only when we first need it)."""
     global stt_model
     if stt_model is None:
         model_path = MODEL_DIR / "whisper"
@@ -73,13 +73,13 @@ def get_stt_model():
 
 def get_model_files() -> dict[str, Path]:
     """
-    Get paths to required GGUF model files.
+    Finds where your model files are hidden.
     
     Returns:
-        Dictionary with paths to main model, mmproj, vocoder, and tokenizer.
+        A dictionary with the file paths we need.
         
     Raises:
-        ValueError: If any required model files are missing.
+        ValueError: If we can't find the models (did you run the download script?).
     """
     # Find model files - prefer Q4_0 quantization
     main_model = list(MODEL_DIR.glob("LFM2.5-Audio-1.5B-Q4_0.gguf"))
@@ -126,15 +126,15 @@ async def run_tts_generation(
     output_path: str,
 ) -> tuple[bool, str]:
     """
-    Run TTS generation using the llama-liquid-audio-cli runner.
+    Runs the actual TTS command behind the scenes.
     
     Args:
-        text: Input text to convert to speech.
-        voice: Voice type to use.
-        output_path: Path to save the output WAV file.
+        text: What you want the computer to say.
+        voice: Which voice to use (e.g., "us_male").
+        output_path: Where to save the temporary audio file.
         
     Returns:
-        Tuple of (success, error_message).
+        A tuple: (Did it work?, Error message if it didn't).
     """
     try:
         models = get_model_files()
@@ -176,9 +176,7 @@ async def run_tts_generation(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """
-    Health check endpoint.
-    
-    Returns the health status of the API and verifies model files are present.
+    Simple check to see if the API is up and running.
     """
     try:
         models = get_model_files()
@@ -197,9 +195,7 @@ async def health_check():
 @app.get("/voices", response_model=VoicesResponse)
 async def list_voices():
     """
-    List available TTS voices.
-    
-    Returns information about all supported voice types.
+    Shows you which voices you can use.
     """
     return VoicesResponse(
         voices=[
@@ -215,19 +211,8 @@ async def list_voices():
 @app.post("/tts/stream")
 async def tts_stream(request: TTSRequest):
     """
-    Convert text to speech with SSE streaming.
-    
-    Returns base64-encoded WAV audio via Server-Sent Events.
-    
-    Event types:
-    - **audio**: Contains the generated audio data
-        - `audio`: base64-encoded WAV data
-        - `format`: "wav"
-        - `sample_rate`: 24000
-    - **complete**: Indicates successful completion
-        - `success`: true
-    - **error**: Indicates an error occurred
-        - `message`: Error description
+    Streams the audio back to you as it's being generated.
+    Great for real-time apps where you don't want to wait for the whole sentence.
     """
     
     async def generate():
@@ -287,10 +272,8 @@ async def tts_stream(request: TTSRequest):
 @app.post("/tts")
 async def tts_sync(request: TTSRequest):
     """
-    Convert text to speech (synchronous).
-    
-    Returns WAV audio directly as a binary response.
-    This is useful for clients that don't support SSE.
+    Standard Text-to-Speech. Returns the whole audio file at once.
+    Easier to use if you don't need streaming.
     """
     output_path = None
     try:
@@ -336,9 +319,8 @@ async def tts_sync(request: TTSRequest):
 @app.post("/stt", response_model=STTResponse)
 async def speech_to_text(file: UploadFile = File(...)):
     """
-    Convert speech to text.
-    
-    Accepts an audio file upload (wav, mp3, etc.) and returns the transcription.
+    Convert your voice recording into text.
+    Upload a wav/mp3 file, and we'll tell you what was said.
     """
     temp_filename = None
     try:

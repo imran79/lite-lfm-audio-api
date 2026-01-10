@@ -10,7 +10,7 @@ from typing import Optional
 BASE_URL = "http://localhost:8000"
 
 def test_health():
-    """Check API health."""
+    """Just checking if the server is awake."""
     print("Checking API health...")
     try:
         response = requests.get(f"{BASE_URL}/health")
@@ -22,7 +22,7 @@ def test_health():
         return False
 
 def test_list_voices():
-    """List available voices."""
+    """Ask the server what voices it has."""
     print("\nListing voices...")
     try:
         response = requests.get(f"{BASE_URL}/voices")
@@ -35,7 +35,10 @@ def test_list_voices():
         print(f"❌ Failed to list voices: {e}")
 
 def test_sync_tts(text: str, voice: str, output: str):
-    """Test synchronous TTS."""
+    """
+    Test the basic TTS. 
+    It waits for the full audio file to be ready before downloading it.
+    """
     print(f"\nTesting Sync TTS (Voice: {voice})...")
     print(f"Input: '{text}'")
     
@@ -58,7 +61,10 @@ def test_sync_tts(text: str, voice: str, output: str):
         print(f"❌ Sync TTS failed: {e}")
 
 def test_stream_tts(text: str, voice: str, output: str):
-    """Test SSE streaming TTS."""
+    """
+    Test the Streaming TTS. 
+    Downloads chunks of audio as they are generated (faster time-to-first-byte).
+    """
     print(f"\nTesting Stream TTS (Voice: {voice})...")
     print(f"Input: '{text}'")
     
@@ -98,7 +104,10 @@ def test_stream_tts(text: str, voice: str, output: str):
 
 
 def test_all_combinations(text: str):
-    """Test all voices with all methods."""
+    """
+    The 'Kitchen Sink' test.
+    Tries every voice with every method to make sure nothing is broken.
+    """
     print("\n" + "="*50)
     print("🚀 STARTING EXHAUSTIVE TEST")
     print("="*50)
@@ -140,7 +149,10 @@ def test_all_combinations(text: str):
 
 
 def test_stt(audio_file: str):
-    """Test Speech-to-Text."""
+    """
+    Test Speech-to-Text.
+    Uploads an audio file and prints what the AI heard.
+    """
     print(f"\nTesting STT with {audio_file}...")
     if not os.path.exists(audio_file):
         print("s❌ Audio file not found. Run TTS test first locally to generate one.")
