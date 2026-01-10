@@ -1,4 +1,4 @@
-# Lite LFM Audio API 🎙️
+# Lite LFM Audio API 
 An easy way to run **Liquid AI's LFM 2.5 Audio model** on your own computer. No expensive GPUs needed!
 
 ## What is this?
