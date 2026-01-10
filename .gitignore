@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# GGUF model files (large files - don't commit to git)
+*.gguf
+
+# Runner binaries
+runners/*.zip
+runners/llama-*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Docker
+.docker/
+
+# Environment
+.env
+.env.local
