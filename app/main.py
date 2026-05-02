@@ -3,12 +3,16 @@ Liquid AI LFM 2.5 Audio API
 
 A simple, local API to run Liquid AI's LFM 2.5 Audio model. 
 It helps you convert text into speech (TTS) and speech back into text (STT) right on your CPU.
+
+Also serves as the LiveKit token provider for the real-time voice agent frontend.
 """
 import os
 import base64
 import json
 import asyncio
 import tempfile
+import time
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -25,6 +29,8 @@ from app.models import (
     VoiceInfo,
     HealthResponse,
     STTResponse,
+    LiveKitTokenRequest,
+    LiveKitTokenResponse,
 )
 
 
@@ -35,6 +41,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+logger = logging.getLogger(__name__)
 
 # Add CORS middleware
 app.add_middleware(
@@ -48,6 +55,11 @@ app.add_middleware(
 # Configuration from environment variables
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/app/models"))
 RUNNER_PATH = Path(os.getenv("RUNNER_PATH", "/app/runners/llama-liquid-audio-cli"))
+
+# LiveKit configuration
+LIVEKIT_URL = os.getenv("LIVEKIT_URL", "ws://localhost:7880")
+LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
+LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
 
 # Voice prompts mapping
 VOICE_PROMPTS = {
@@ -356,6 +368,94 @@ async def speech_to_text(file: UploadFile = File(...)):
     finally:
         if temp_filename and os.path.exists(temp_filename):
             os.unlink(temp_filename)
+
+
+# ---------------------------------------------------------------------------
+# LiveKit Token Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/livekit/token", response_model=LiveKitTokenResponse)
+async def create_livekit_token(request: LiveKitTokenRequest = None):
+    """
+    Generate a LiveKit room token for a frontend client.
+    The client uses this token to connect to the LiveKit room and
+    interact with the voice agent in real time.
+    """
+    try:
+        from livekit import api
+
+        # Generate a unique identity for this participant
+        identity = f"user-{int(time.time() * 1000)}"
+        selected_voice = request.voice if request and request.voice else "us_male"
+        room_name = (
+            request.room
+            if request and request.room
+            else f"lfm-audio-room-{selected_voice}-{int(time.time() * 1000)}"
+        )
+        logger.warning("Issuing token for room=%s with voice=%s", room_name, selected_voice)
+
+        # Create an access token using the fluent builder pattern
+        token = (
+            api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+            .with_identity(identity)
+            .with_name(identity)
+            .with_grants(
+                api.VideoGrants(
+                    room_join=True,
+                    room=room_name,
+                    can_publish=True,
+                    can_subscribe=True,
+                )
+            )
+        )
+
+        jwt_token = token.to_jwt()
+
+        # Return the WS URL that the browser should connect to
+        # For browser clients, use the external-facing URL (not internal Docker network)
+        browser_url = os.getenv("LIVEKIT_BROWSER_URL", "ws://localhost:7880")
+
+        # Explicitly dispatch the agent since --dev might not do it with custom config
+        import asyncio
+        import logging
+        async def dispatch_agent():
+            try:
+                # Use internal URL for the API (must be HTTP, not WS)
+                lk_url = os.getenv("LIVEKIT_URL", "ws://livekit:7880")
+                lk_url = lk_url.replace("ws://", "http://").replace("wss://", "https://")
+                
+                lkapi = api.LiveKitAPI(lk_url, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+                await lkapi.room.create_room(
+                    api.CreateRoomRequest(
+                        name=room_name,
+                        metadata=json.dumps({"voice": selected_voice}),
+                    )
+                )
+                await lkapi.agent_dispatch.create_dispatch(api.CreateAgentDispatchRequest(
+                    room=room_name,
+                    agent_name="lfm-audio-agent"
+                ))
+                await lkapi.aclose()
+                logging.warning(f"Explicitly dispatched agent 'lfm-audio-agent' to room '{room_name}'")
+            except Exception as e:
+                logging.error(f"Agent dispatch failed: {e}")
+        
+        asyncio.create_task(dispatch_agent())
+
+        return LiveKitTokenResponse(
+            token=jwt_token,
+            url=browser_url,
+            identity=identity,
+            room=room_name,
+        )
+
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="livekit-api package not installed. Run: pip install livekit-api",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Token generation failed: {str(e)}")
 
 
 if __name__ == "__main__":

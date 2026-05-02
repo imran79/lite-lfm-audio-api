@@ -1,0 +1,15 @@
+# =============================================================================
+# GPU Override — Use with: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# =============================================================================
+# Enables NVIDIA GPU passthrough for Ollama to dramatically speed up LLM inference.
+# Requires: nvidia-container-toolkit installed on the host.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]

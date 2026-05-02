@@ -1,45 +1,91 @@
 # Lite LFM Audio API 🎙️
-An easy way to run **Liquid AI's LFM 2.5 Audio model** on your own computer. No expensive GPUs needed!
+A real-time voice AI agent powered by **Liquid AI's LFM 2.5 Audio** model, **Ollama** for LLM inference, and **LiveKit** for WebRTC transport.
 
 ## What is this?
-It's a simple API that wraps the powerful LFM 2.5 model so you can use it just like any other web service.
 
-- **Speak (TTS)**: Give it text, and it talks back.
-- **Listen (STT)**: Give it an audio file, and it types it out (using `faster-whisper`).
-- **Stream**: Get audio chunks in real-time (no waiting for the whole sentence).
-- **CPU Friendly**: Runs on standard computers thanks to GGUF quantization.
-- **Dockerized**: Just one command to start everything.
+A self-hosted voice AI platform that lets you have real-time conversations with an AI agent — all running locally on your machine.
+
+### Architecture
+
+```
+Browser (WebRTC) → LiveKit Server → Voice Agent Pipeline → LiveKit Server → Browser
+                                    ├── Silero VAD (voice detection)
+                                    ├── Faster-Whisper STT (speech → text)
+                                    ├── Ollama LLM (text reasoning)
+                                    └── LFM 2.5 Audio TTS (text → speech)
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| 🎤 **Real-time Voice** | Talk to the AI agent in real-time via WebRTC |
+| 🧠 **Local LLM** | Ollama runs `qwen2.5:0.5b` with tool-calling support |
+| 🔊 **Premium TTS** | Liquid AI LFM 2.5 Audio with multiple voice options |
+| 👂 **Fast STT** | Faster-Whisper for CPU-optimized speech recognition |
+| 🐳 **Fully Dockerized** | One command to start the entire stack |
+| 🔒 **Self-hosted** | All data stays on your machine |
+| 🎮 **GPU Support** | Optional NVIDIA GPU acceleration for Ollama |
+| 📡 **Legacy REST API** | Original HTTP endpoints still work |
+
+## Quick Start
+
+### Prerequisites
+
+- [Docker](https://www.docker.com/) and Docker Compose installed
+- 8GB+ RAM recommended (16GB with GPU for best performance)
+
+### 1. Start the stack (CPU-only)
+
+```bash
+docker compose up --build
+```
+
+### 1b. Start with GPU acceleration (optional)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on your host.
+
+### 2. Wait for model downloads
+
+On first run, the system will:
+- Download LFM 2.5 Audio GGUF models (~1GB)
+- Download the Whisper STT model (~150MB)
+- Pull `qwen2.5:0.5b` into Ollama
+
+### 3. Open the voice client
+
+Navigate to **http://localhost:3000** in your browser.
+
+Click **Connect**, allow microphone access, and start talking!
+
+## Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **Frontend** | `3000` | Browser voice client |
+| **FastAPI** | `8000` | REST API + LiveKit token provider |
+| **LiveKit** | `7880` | WebRTC media server |
+| **Ollama** | `11434` | LLM inference |
 
 ## API Endpoints
 
+### Real-time Voice (Primary)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/livekit/token` | POST | Get a LiveKit room token for WebRTC connection |
+
+### Legacy REST API (Still works)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check and model status |
 | `/voices` | GET | List available voices |
 | `/tts/stream` | POST | TTS with SSE streaming (base64 audio) |
 | `/tts` | POST | TTS with direct WAV response |
-
-## Quick Start
-
-### Prerequisites
-
-- Docker and Docker Compose installed
-- GGUF model files (already included):
-  - `LFM2.5-Audio-1.5B-Q4_0.gguf` (main model)
-  - `mmproj-LFM2.5-Audio-1.5B-Q4_0.gguf` (multimodal projector)
-  - `vocoder-LFM2.5-Audio-1.5B-Q4_0.gguf` (audio vocoder)
-  - `tokenizer-LFM2.5-Audio-1.5B-Q4_0.gguf` (tokenizer)
-
-### How to Run
-
-1.  Make sure you have [Docker](https://www.docker.com/) installed.
-2.  Run this command:
-
-```bash
-docker-compose up --build
-```
-
-That's it! The API is now listening at `http://localhost:8000`.
+| `/stt` | POST | Speech-to-text (upload audio file) |
 
 ### API Documentation
 
@@ -47,59 +93,10 @@ Once running, visit:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-## Usage Examples
-
-### SSE Streaming (JavaScript)
-
-```javascript
-const eventSource = new EventSource('/tts/stream', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    text: 'Hello, this is a test.',
-    voice: 'us_male'
-  })
-});
-
-eventSource.addEventListener('audio', (event) => {
-  const data = JSON.parse(event.data);
-  const audioBlob = base64ToBlob(data.audio, 'audio/wav');
-  // Play or save the audio
-});
-
-eventSource.addEventListener('complete', () => {
-  eventSource.close();
-});
-```
-
-### Synchronous Request (curl)
-
-```bash
-curl -X POST "http://localhost:8000/tts" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hello, this is a test.", "voice": "default"}' \
-  --output speech.wav
-```
-
-### Python Client
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:8000/tts",
-    json={"text": "Hello, world!", "voice": "uk_female"}
-)
-
-with open("output.wav", "wb") as f:
-    f.write(response.content)
-```
-
 ## Available Voices
 
 | Voice ID | Name | Language |
 |----------|------|----------|
-| `default` | Default | English |
 | `us_male` | US Male | en-US |
 | `us_female` | US Female | en-US |
 | `uk_male` | UK Male | en-GB |
@@ -107,18 +104,54 @@ with open("output.wav", "wb") as f:
 
 ## Configuration
 
-Environment variables:
+Copy `.env.example` to `.env` and customize:
+
+```bash
+cp .env.example .env
+```
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_DIR` | `/app/models` | Directory containing GGUF model files |
-| `RUNNER_PATH` | `/app/runners/llama-liquid-audio-cli` | Path to the llama runner binary |
+| `LIVEKIT_URL` | `ws://localhost:7880` | LiveKit server URL |
+| `LIVEKIT_API_KEY` | `devkey` | LiveKit API key |
+| `LIVEKIT_API_SECRET` | `secret` | LiveKit API secret |
+| `OLLAMA_BASE_URL` | `http://ollama:11434/v1` | Ollama API endpoint |
+| `OLLAMA_MODEL` | `qwen2.5:0.5b` | LLM model for the agent |
+| `TTS_VOICE` | `us_male` | Default TTS voice |
+| `WHISPER_MODEL_SIZE` | `base.en` | Whisper model variant |
 
-## Model Files
+## Project Structure
 
-The GGUF model files were downloaded from [LiquidAI/LFM2.5-Audio-1.5B-GGUF](https://huggingface.co/LiquidAI/LFM2.5-Audio-1.5B-GGUF).
+```
+lite_lfm_audio_api/
+├── agent/                    # LiveKit Voice Agent
+│   ├── main.py              # Agent entry point
+│   ├── config.py            # Configuration
+│   ├── stt_plugin.py        # Faster-Whisper STT plugin
+│   ├── tts_plugin.py        # LFM Audio TTS plugin
+│   └── requirements.txt     # Agent dependencies
+├── app/                      # FastAPI REST API
+│   ├── main.py              # API endpoints
+│   └── models.py            # Pydantic models
+├── frontend/                 # Browser voice client
+│   ├── index.html           # Voice UI
+│   └── Dockerfile           # Nginx container
+├── runners/                  # LFM Audio CLI binaries
+├── docker-compose.yml        # Full service stack
+├── docker-compose.gpu.yml    # GPU override
+├── Dockerfile                # API container
+├── Dockerfile.agent          # Agent container
+├── download_models.sh        # Model download script
+└── client_test.py            # Legacy REST client test
+```
 
-Total size: ~1GB (Q4_0 quantization)
+## Legacy REST Client
+
+The original HTTP test client still works:
+
+```bash
+python client_test.py --mode all
+```
 
 ## License
 

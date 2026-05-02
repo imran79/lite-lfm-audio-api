@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFM Voice Agent — Real-time AI Conversation</title>
+    <meta name="description"
+        content="Real-time voice conversation with an AI agent powered by Liquid AI LFM 2.5 Audio and LiveKit.">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- LiveKit Client SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: rgba(255, 255, 255, 0.03);
+            --bg-glass: rgba(255, 255, 255, 0.06);
+            --border: rgba(255, 255, 255, 0.08);
+            --text-primary: #e8e8ed;
+            --text-secondary: #8b8b9e;
+            --text-muted: #555568;
+            --accent: #6c5ce7;
+            --accent-glow: rgba(108, 92, 231, 0.3);
+            --accent-secondary: #a29bfe;
+            --success: #00e676;
+            --success-glow: rgba(0, 230, 118, 0.25);
+            --danger: #ff5252;
+            --danger-glow: rgba(255, 82, 82, 0.25);
+            --warning: #ffd740;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Animated gradient background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(ellipse at 20% 20%, rgba(108, 92, 231, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(162, 155, 254, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(108, 92, 231, 0.04) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+            animation: bgShift 20s ease-in-out infinite alternate;
+        }
+
+        @keyframes bgShift {
+            0% {
+                opacity: 0.8;
+                transform: scale(1);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1.05);
+            }
+        }
+
+        .app-container {
+            position: relative;
+            z-index: 1;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 32px 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-secondary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        /* Status Badge */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 32px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 100px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: var(--bg-glass);
+            border: 1px solid var(--border);
+            transition: all 0.4s ease;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            transition: all 0.4s ease;
+        }
+
+        .status-badge.connected .status-dot {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success-glow);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-badge.error .status-dot {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger-glow);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.6;
+                transform: scale(0.85);
+            }
+        }
+
+        /* Conversation Area */
+        .conversation-area {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            min-height: 340px;
+            max-height: 55vh;
+            overflow-y: auto;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .conversation-area::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .conversation-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .conversation-area::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        .message {
+            margin-bottom: 18px;
+            animation: msgIn 0.3s ease-out;
+        }
+
+        @keyframes msgIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-label {
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 4px;
+        }
+
+        .message.user .message-label {
+            color: var(--accent-secondary);
+        }
+
+        .message.agent .message-label {
+            color: var(--success);
+        }
+
+        .message-text {
+            font-size: 0.935rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: var(--bg-glass);
+            border: 1px solid var(--border);
+        }
+
+        .message.agent .message-text {
+            background: rgba(108, 92, 231, 0.06);
+            border-color: rgba(108, 92, 231, 0.12);
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 240px;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .empty-state-icon {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .empty-state p {
+            font-size: 0.875rem;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .mic-button {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            border: 2px solid var(--border);
+            background: var(--bg-glass);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            backdrop-filter: blur(10px);
+        }
+
+        .mic-button:hover {
+            border-color: var(--accent);
+            color: var(--accent-secondary);
+            transform: scale(1.05);
+            box-shadow: 0 0 24px var(--accent-glow);
+        }
+
+        .mic-button.active {
+            border-color: var(--success);
+            background: rgba(0, 230, 118, 0.1);
+            color: var(--success);
+            box-shadow: 0 0 32px var(--success-glow);
+            animation: micPulse 1.5s ease-in-out infinite;
+        }
+
+        .mic-button.active:hover {
+            box-shadow: 0 0 40px var(--success-glow);
+        }
+
+        @keyframes micPulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 24px var(--success-glow);
+            }
+
+            50% {
+                box-shadow: 0 0 40px var(--success-glow), 0 0 60px rgba(0, 230, 118, 0.1);
+            }
+        }
+
+        .mic-button svg {
+            width: 28px;
+            height: 28px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 22px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            border: 1px solid var(--border);
+            background: var(--bg-glass);
+            color: var(--text-secondary);
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, #5a4bd1 100%);
+            color: white;
+            border: none;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .btn-danger {
+            border-color: rgba(255, 82, 82, 0.3);
+            color: var(--danger);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 82, 82, 0.1);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Voice Selector */
+        .voice-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .voice-selector label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .voice-selector select {
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            background: var(--bg-glass);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .voice-selector select:hover,
+        .voice-selector select:focus {
+            border-color: var(--accent);
+        }
+
+        /* Audio Visualizer */
+        .visualizer {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            height: 32px;
+            margin: 8px 0;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .visualizer.active {
+            opacity: 1;
+        }
+
+        .visualizer-bar {
+            width: 3px;
+            background: var(--accent);
+            border-radius: 2px;
+            height: 8px;
+            transition: height 0.1s ease;
+        }
+
+        .visualizer.active .visualizer-bar {
+            animation: vizBar 0.8s ease-in-out infinite;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(1) {
+            animation-delay: 0.0s;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(2) {
+            animation-delay: 0.1s;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(3) {
+            animation-delay: 0.2s;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(4) {
+            animation-delay: 0.3s;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(5) {
+            animation-delay: 0.4s;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(6) {
+            animation-delay: 0.3s;
+        }
+
+        .visualizer.active .visualizer-bar:nth-child(7) {
+            animation-delay: 0.2s;
+        }
+
+        @keyframes vizBar {
+
+            0%,
+            100% {
+                height: 6px;
+                opacity: 0.4;
+            }
+
+            50% {
+                height: 28px;
+                opacity: 1;
+            }
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .footer a {
+            color: var(--accent-secondary);
+            text-decoration: none;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .app-container {
+                padding: 20px 14px;
+            }
+
+            .header h1 {
+                font-size: 1.4rem;
+            }
+
+            .conversation-area {
+                min-height: 260px;
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <div class="header">
+            <h1>LFM Voice Agent</h1>
+            <p>Real-time AI conversation powered by Liquid AI &amp; LiveKit</p>
+        </div>
+
+        <!-- Status -->
+        <div class="status-bar">
+            <div class="status-badge" id="statusBadge">
+                <span class="status-dot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </div>
+
+        <!-- Audio Visualizer -->
+        <div class="visualizer" id="visualizer">
+            <div class="visualizer-bar"></div>
+            <div class="visualizer-bar"></div>
+            <div class="visualizer-bar"></div>
+            <div class="visualizer-bar"></div>
+            <div class="visualizer-bar"></div>
+            <div class="visualizer-bar"></div>
+            <div class="visualizer-bar"></div>
+        </div>
+
+        <!-- Conversation -->
+        <div class="conversation-area" id="conversationArea">
+            <div class="empty-state" id="emptyState">
+                <div class="empty-state-icon">🎙️</div>
+                <p>Connect and start speaking to chat with the AI agent</p>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button class="mic-button" id="micButton" disabled title="Toggle Microphone">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+            </button>
+
+            <div class="action-buttons">
+                <button class="btn btn-primary" id="connectBtn">Connect</button>
+                <button class="btn btn-danger" id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+
+            <div class="voice-selector">
+                <label for="voiceSelect">Voice:</label>
+                <select id="voiceSelect">
+                    <option value="us_male">US Male</option>
+                    <option value="us_female">US Female</option>
+                    <option value="uk_male">UK Male</option>
+                    <option value="uk_female">UK Female</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            Powered by <a href="https://liquid.ai" target="_blank">Liquid AI</a> LFM 2.5 Audio
+            &middot; <a href="https://livekit.io" target="_blank">LiveKit</a>
+            &middot; <a href="https://ollama.com" target="_blank">Ollama</a>
+        </div>
+    </div>
+
+    <!-- Hidden audio element for agent playback -->
+    <audio id="agentAudio" autoplay></audio>
+
+    <script>
+        // =====================================================================
+        // Configuration — All requests go through the Nginx reverse proxy
+        //   /api/  →  FastAPI backend
+        // =====================================================================
+        const API_BASE = window.location.origin + '/api';
+        const TOKEN_ENDPOINT = `${API_BASE}/livekit/token`;
+
+        // =====================================================================
+        // DOM Elements
+        // =====================================================================
+        const statusBadge = document.getElementById('statusBadge');
+        const statusText = document.getElementById('statusText');
+        const conversationArea = document.getElementById('conversationArea');
+        const emptyState = document.getElementById('emptyState');
+        const micButton = document.getElementById('micButton');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const voiceSelect = document.getElementById('voiceSelect');
+        const visualizer = document.getElementById('visualizer');
+        const agentAudio = document.getElementById('agentAudio');
+
+        // =====================================================================
+        // State
+        // =====================================================================
+        let room = null;
+        let micEnabled = false;
+        let seenFinalSegmentIds = new Set();
+        let agentTrackSids = new Set();
+        let userTrackSids = new Set();
+
+        // =====================================================================
+        // UI Helpers
+        // =====================================================================
+        function setStatus(text, state = 'default') {
+            statusText.textContent = text;
+            statusBadge.className = 'status-badge';
+            if (state === 'connected') statusBadge.classList.add('connected');
+            if (state === 'error') statusBadge.classList.add('error');
+        }
+
+        function addMessage(role, text) {
+            if (emptyState) emptyState.remove();
+
+            const msg = document.createElement('div');
+            msg.className = `message ${role}`;
+            msg.innerHTML = `
+                <div class="message-label">${role === 'user' ? 'You' : 'Agent'}</div>
+                <div class="message-text">${escapeHtml(text)}</div>
+            `;
+            conversationArea.appendChild(msg);
+            conversationArea.scrollTop = conversationArea.scrollHeight;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function findParticipantByTrackSid(trackSid) {
+            if (!room || !trackSid) return null;
+
+            const local = room.localParticipant;
+            if (local?.trackPublications) {
+                for (const pub of local.trackPublications.values()) {
+                    if (pub?.trackSid === trackSid || pub?.sid === trackSid) return local;
+                }
+            }
+
+            if (room.remoteParticipants) {
+                for (const remote of room.remoteParticipants.values()) {
+                    if (!remote?.trackPublications) continue;
+                    for (const pub of remote.trackPublications.values()) {
+                        if (pub?.trackSid === trackSid || pub?.sid === trackSid) return remote;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        function trackSidFromPublication(publication) {
+            if (!publication || typeof publication !== 'object') return null;
+            return publication.trackSid || publication.sid || null;
+        }
+
+        function noteTrackSidForRole(trackSid, role) {
+            if (!trackSid) return;
+            if (role === 'agent') {
+                agentTrackSids.add(trackSid);
+                userTrackSids.delete(trackSid);
+            } else {
+                userTrackSids.add(trackSid);
+                agentTrackSids.delete(trackSid);
+            }
+        }
+
+        function isAgentIdentity(identity) {
+            if (!identity) return false;
+            if (room?.localParticipant?.identity === identity) {
+                return room.localParticipant.isAgent === true;
+            }
+
+            const remote = room?.remoteParticipants?.get(identity);
+            if (remote) return remote.isAgent === true;
+
+            // Fallback for agent identities commonly prefixed by LiveKit agent jobs.
+            return identity.startsWith('agent-');
+        }
+
+        function resolveTranscriptRole(seg, participant, publication, participantIdentityFromEvent, trackSidFromEvent) {
+            const inferredTrackSid = seg?.trackSid || trackSidFromPublication(publication) || trackSidFromEvent || null;
+
+            if (inferredTrackSid && agentTrackSids.has(inferredTrackSid)) return 'agent';
+            if (inferredTrackSid && userTrackSids.has(inferredTrackSid)) return 'user';
+
+            const eventParticipant = participant || publication?.participant || findParticipantByTrackSid(inferredTrackSid);
+            if (eventParticipant) return eventParticipant.isAgent ? 'agent' : 'user';
+
+            const identity =
+                participantIdentityFromEvent ||
+                seg?.participantIdentity ||
+                seg?.participant?.identity ||
+                publication?.participantIdentity ||
+                publication?.participantSid;
+
+            if (identity) return isAgentIdentity(identity) ? 'agent' : 'user';
+
+            // Final fallback: preserve visibility of user transcripts.
+            return 'user';
+        }
+
+        // =====================================================================
+        // LiveKit Connection
+        // =====================================================================
+        async function connect() {
+            try {
+                setStatus('Connecting...', 'default');
+                connectBtn.disabled = true;
+
+                // Fetch a room token from the API
+                const voice = voiceSelect.value;
+                const res = await fetch(TOKEN_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ voice }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to get token');
+                }
+
+                const { token, url } = await res.json();
+
+                // Create LiveKit room
+                room = new LivekitClient.Room({
+                    adaptiveStream: true,
+                    dynacast: true,
+                });
+
+                // --- Event listeners ---
+
+                room.on(LivekitClient.RoomEvent.Connected, () => {
+                    setStatus('Connected', 'connected');
+                    disconnectBtn.disabled = false;
+                    micButton.disabled = false;
+                });
+
+                room.on(LivekitClient.RoomEvent.Disconnected, () => {
+                    handleDisconnect();
+                });
+
+                room.on(LivekitClient.RoomEvent.LocalTrackPublished, (publication) => {
+                    noteTrackSidForRole(trackSidFromPublication(publication), 'user');
+                });
+
+                room.on(LivekitClient.RoomEvent.TrackPublished, (publication, participant) => {
+                    if (!participant || publication?.kind !== LivekitClient.Track.Kind.Audio) return;
+                    noteTrackSidForRole(
+                        trackSidFromPublication(publication),
+                        participant.isAgent ? 'agent' : 'user'
+                    );
+                });
+
+                // Handle agent audio tracks
+                room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    if (track.kind === LivekitClient.Track.Kind.Audio) {
+                        track.attach(agentAudio);
+                        visualizer.classList.add('active');
+                        noteTrackSidForRole(
+                            trackSidFromPublication(publication),
+                            participant?.isAgent ? 'agent' : 'user'
+                        );
+                    }
+                });
+
+                room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+                    track.detach();
+                    visualizer.classList.remove('active');
+                });
+
+                // Handle transcriptions (data messages from agent)
+                room.on(LivekitClient.RoomEvent.TranscriptionReceived, (arg1, arg2, arg3) => {
+                    let segments = [];
+                    let participant = null;
+                    let publication = null;
+                    let participantIdentityFromEvent = null;
+                    let trackSidFromEvent = null;
+
+                    if (Array.isArray(arg1)) {
+                        segments = arg1;
+                    } else if (arg1 && typeof arg1 === 'object') {
+                        segments = Array.isArray(arg1.segments) ? arg1.segments : [];
+                        participantIdentityFromEvent =
+                            arg1.participantIdentity || arg1.participant_identity || null;
+                        trackSidFromEvent = arg1.trackSid || arg1.track_sid || null;
+                    }
+
+                    if (arg2 && typeof arg2 === 'object') {
+                        if ('isAgent' in arg2 || 'identity' in arg2) {
+                            participant = arg2;
+                        } else {
+                            publication = arg2;
+                        }
+                    } else if (typeof arg2 === 'string') {
+                        participantIdentityFromEvent = participantIdentityFromEvent || arg2;
+                    }
+
+                    if (arg3 && typeof arg3 === 'object') {
+                        publication = arg3;
+                    } else if (typeof arg3 === 'string') {
+                        trackSidFromEvent = trackSidFromEvent || arg3;
+                    }
+
+                    for (const seg of segments) {
+                        if (!seg?.final) continue;
+                        if (!seg?.text?.trim()) continue;
+
+                        if (seg.id && seenFinalSegmentIds.has(seg.id)) continue;
+                        if (seg.id) seenFinalSegmentIds.add(seg.id);
+
+                        const role = resolveTranscriptRole(
+                            seg,
+                            participant,
+                            publication,
+                            participantIdentityFromEvent,
+                            trackSidFromEvent
+                        );
+                        if (!role) continue;
+
+                        addMessage(role, seg.text.trim());
+                    }
+                });
+
+                await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                // Connect to the room
+                await room.connect(url, token);
+
+                // Publish microphone by default
+                await room.localParticipant.setMicrophoneEnabled(true);
+                if (room.localParticipant?.trackPublications) {
+                    for (const pub of room.localParticipant.trackPublications.values()) {
+                        noteTrackSidForRole(trackSidFromPublication(pub), 'user');
+                    }
+                }
+                micEnabled = true;
+                micButton.classList.add('active');
+
+            } catch (err) {
+                console.error('Connection failed:', err);
+                setStatus(`Error: ${err.message}`, 'error');
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function disconnect() {
+            if (room) {
+                await room.disconnect();
+            }
+            handleDisconnect();
+        }
+
+        function handleDisconnect() {
+            setStatus('Disconnected', 'default');
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            micButton.disabled = true;
+            micButton.classList.remove('active');
+            visualizer.classList.remove('active');
+            micEnabled = false;
+            seenFinalSegmentIds.clear();
+            agentTrackSids.clear();
+            userTrackSids.clear();
+            room = null;
+        }
+
+        async function toggleMic() {
+            if (!room) return;
+            micEnabled = !micEnabled;
+            await room.localParticipant.setMicrophoneEnabled(micEnabled);
+            micButton.classList.toggle('active', micEnabled);
+        }
+
+        // =====================================================================
+        // Event Bindings
+        // =====================================================================
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+        micButton.addEventListener('click', toggleMic);
+    </script>
+</body>
+
+</html>

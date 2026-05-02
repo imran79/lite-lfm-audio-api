@@ -1,18 +1,140 @@
 version: "3.8"
 
 services:
-  tts-api:
-    build: .
+  # ---------------------------------------------------------------------------
+  # Nginx Reverse Proxy — Single entry point for all web services
+  #   /          →  Frontend (voice client)
+  #   /api/      →  FastAPI (REST API + LiveKit tokens)
+  #   /livekit/  →  LiveKit signal (WebSocket)
+  # ---------------------------------------------------------------------------
+  proxy:
+    image: nginx:alpine
     ports:
-      - "8000:8000"
+      - "8080:80"
     volumes:
-      # Use a named volume for models so they persist after download
-      - model_data:/app/models
-      # Mount local runners if you have them, otherwise they'll be downloaded
-      - ./runners:/app/runners
+      - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - tts-api
+      - livekit
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis — State backend for LiveKit Server
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # LiveKit Server — Self-hosted WebRTC media transport
+  # LiveKit signal is proxied via /livekit/ but RTC ports must be direct.
+  # ---------------------------------------------------------------------------
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml --node-ip 127.0.0.1 --dev
+    ports:
+      - "7881:7881"     # RTC over TCP fallback (cannot be proxied)
+      - "50000-50100:50000-50100/udp"  # WebRTC media (cannot be proxied)
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Ollama — Local LLM inference (qwen2.5:0.5b with tool calling support)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
     environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=30m
+      - OLLAMA_LOAD_TIMEOUT=10m
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 4G
+
+  # ---------------------------------------------------------------------------
+  # Ollama Model Puller — One-shot init that pulls qwen2.5:0.5b on first start
+  # ---------------------------------------------------------------------------
+  ollama-pull:
+    image: curlimages/curl:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c '
+        echo "Pulling qwen2.5:0.5b model into Ollama..."
+        curl -sf http://ollama:11434/api/pull -d "{\"name\": \"qwen2.5:0.5b\"}"
+        echo ""
+        echo "Model pull complete."
+      '
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # LiveKit Agent — Voice AI pipeline (VAD → STT → LLM → TTS)
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    volumes:
+      - model_data:/app/models
+      - ./runners:/app/runners
+      - ./agent:/app/agent
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - OLLAMA_MODEL=qwen2.5:0.5b
+      - OLLAMA_TIMEOUT_SECONDS=90
       - MODEL_DIR=/app/models
       - RUNNER_PATH=/app/runners/llama-liquid-audio-cli
+      - TTS_VOICE=us_male
+      - WHISPER_MODEL_SIZE=base.en
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=int8
+      - AGENT_NAME=lfm-audio-agent
+      - MIN_ENDPOINTING_DELAY=0.6
+      - MAX_ENDPOINTING_DELAY=2.0
+      - MIN_CONSECUTIVE_SPEECH_DELAY=0.15
+      - MIN_INTERRUPTION_DURATION=0.6
+      - MIN_INTERRUPTION_WORDS=2
+      - ALLOW_INTERRUPTIONS=true
+      - RESUME_FALSE_INTERRUPTION=true
+      - FALSE_INTERRUPTION_TIMEOUT=2.0
+    depends_on:
+      livekit:
+        condition: service_started
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -21,5 +143,47 @@ services:
         reservations:
           memory: 2G
 
+  # ---------------------------------------------------------------------------
+  # FastAPI — REST API + LiveKit token endpoint (no direct port exposure)
+  # ---------------------------------------------------------------------------
+  tts-api:
+    build: .
+    volumes:
+      - model_data:/app/models
+      - ./runners:/app/runners
+      - ./app:/app/app
+    environment:
+      - MODEL_DIR=/app/models
+      - RUNNER_PATH=/app/runners/llama-liquid-audio-cli
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - LIVEKIT_BROWSER_URL=ws://localhost:8080/livekit/
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # ---------------------------------------------------------------------------
+  # Frontend — Browser-based voice client (no direct port exposure)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      - tts-api
+      - livekit
+    restart: unless-stopped
+
 volumes:
+  redis_data:
+  ollama_data:
   model_data:

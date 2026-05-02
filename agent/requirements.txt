@@ -1,0 +1,5 @@
+# LiveKit Agent dependencies
+livekit-agents[openai,silero]~=1.4
+python-dotenv>=1.0.0
+faster-whisper>=0.10.0
+duckduckgo-search>=6.0.0

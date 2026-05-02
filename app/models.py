@@ -57,3 +57,21 @@ class STTResponse(BaseModel):
 class ErrorEvent(BaseModel):
     """SSE event data for errors."""
     message: str
+
+
+# ---------------------------------------------------------------------------
+# LiveKit Token Models
+# ---------------------------------------------------------------------------
+
+class LiveKitTokenRequest(BaseModel):
+    """Request model for LiveKit token generation."""
+    voice: str = Field(default="us_male", description="Voice type for the agent to use")
+    room: str | None = Field(default=None, description="Optional room name (auto-generated if not provided)")
+
+
+class LiveKitTokenResponse(BaseModel):
+    """Response model for LiveKit token generation."""
+    token: str = Field(..., description="JWT token for LiveKit room access")
+    url: str = Field(..., description="LiveKit WebSocket URL to connect to")
+    identity: str = Field(..., description="Participant identity in the room")
+    room: str = Field(..., description="Room name")

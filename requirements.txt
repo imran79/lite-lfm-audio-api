@@ -5,3 +5,4 @@ httpx>=0.25.0
 pydantic>=2.0.0
 faster-whisper>=0.10.0
 python-multipart>=0.0.9
+livekit-api>=1.0.0
