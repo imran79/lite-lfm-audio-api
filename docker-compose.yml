@@ -104,6 +104,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.agent
+    env_file:
+      - .env
     volumes:
       - model_data:/app/models
       - ./runners:/app/runners
@@ -148,6 +150,8 @@ services:
   # ---------------------------------------------------------------------------
   tts-api:
     build: .
+    env_file:
+      - .env
     volumes:
       - model_data:/app/models
       - ./runners:/app/runners

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import struct
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,8 @@ def _find_model_files() -> dict[str, Path]:
         found = list(MODEL_DIR.glob(preferred))
         if not found:
             found = list(MODEL_DIR.glob(fallback))
+        if len(found) > 1:
+            logger.warning("Multiple files match for %s in %s; using %s", key, MODEL_DIR, found[0])
         if found:
             result[key] = found[0]
         else:
@@ -106,33 +109,72 @@ class LFMAudioSynthesizeStream(tts.ChunkedStream):
         super().__init__(tts=tts, input_text=text, conn_options=conn_options)
         self._voice = voice
 
-    async def _to_pcm16_bytes(self, wav_path: str, sample_rate: int, num_channels: int) -> bytes:
+    @staticmethod
+    def _wav_to_pcm16(filepath: str) -> tuple[bytes, int, int]:
         """
-        Normalize model output to PCM16 bytes for LiveKit.
+        Read a WAV file (PCM or IEEE float) and convert to PCM16 s16le.
 
-        The LFM runner can emit floating-point WAV (format tag 3), which the
-        stdlib `wave` reader in Python 3.12 cannot parse.
+        This pure-Python parser handles both standard PCM WAVs and IEEE float
+        WAVs (format tag 3) that Python 3.12's ``wave`` module cannot read.
+
+        Returns:
+            Tuple of (pcm16_bytes, sample_rate, num_channels).
         """
-        cmd = [
-            "ffmpeg",
-            "-v", "error",
-            "-i", wav_path,
-            "-f", "s16le",
-            "-acodec", "pcm_s16le",
-            "-ar", str(sample_rate),
-            "-ac", str(num_channels),
-            "pipe:1",
-        ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown ffmpeg decode error"
-            raise RuntimeError(f"Failed to decode TTS output to PCM16: {error_msg}")
-        return stdout
+        with open(filepath, "rb") as f:
+            data = f.read()
+
+        if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+            raise ValueError("Not a valid WAV file")
+
+        pos = 12
+        sample_rate = 0
+        num_channels = 0
+        bits_per_sample = 0
+        format_tag = 0
+        audio_data = None
+
+        while pos + 8 <= len(data):
+            chunk_id = data[pos : pos + 4]
+            chunk_size = struct.unpack("<I", data[pos + 4 : pos + 8])[0]
+
+            if chunk_id == b"fmt ":
+                fmt_data = data[pos + 8 : pos + 8 + chunk_size]
+                (
+                    format_tag,
+                    num_channels,
+                    sample_rate,
+                    _,
+                    _,
+                    bits_per_sample,
+                ) = struct.unpack("<HHIIHH", fmt_data[:16])
+            elif chunk_id == b"data":
+                audio_data = data[pos + 8 : pos + 8 + chunk_size]
+
+            pos += 8 + chunk_size
+            if chunk_size % 2:
+                pos += 1  # Skip padding byte
+
+        if audio_data is None:
+            raise ValueError("No data chunk found in WAV file")
+        if sample_rate == 0 or num_channels == 0:
+            raise ValueError("Invalid WAV header (missing format chunk)")
+
+        if format_tag == 1:  # PCM / raw — return as-is
+            return audio_data, sample_rate, num_channels
+
+        if format_tag == 3:  # IEEE float → convert to PCM16
+            num_samples = len(audio_data) // (bits_per_sample // 8)
+            if bits_per_sample == 32:
+                floats = struct.unpack(f"<{num_samples}f", audio_data)
+            elif bits_per_sample == 64:
+                floats = struct.unpack(f"<{num_samples}d", audio_data)
+            else:
+                raise ValueError(f"Unsupported float bit depth: {bits_per_sample}")
+
+            ints = [max(-32768, min(32767, int(sample * 32767))) for sample in floats]
+            return struct.pack(f"<{len(ints)}h", *ints), sample_rate, num_channels
+
+        raise ValueError(f"Unsupported WAV format tag: {format_tag}")
 
     async def _run(self, output_emitter: tts.AudioEmitter = None) -> None:
         """Execute the TTS CLI and push synthesized audio frames."""
@@ -159,13 +201,19 @@ class LFMAudioSynthesizeStream(tts.ChunkedStream):
 
             logger.debug("Running TTS command: %s", " ".join(cmd))
 
-            # Run the CLI tool
+            # Run the CLI tool with abort support
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
+            try:
+                stdout, stderr = await process.communicate()
+            except asyncio.CancelledError:
+                logger.info("TTS subprocess cancelled, killing process")
+                process.kill()
+                await process.wait()
+                raise
 
             if process.returncode != 0:
                 error_msg = stderr.decode() if stderr else "Unknown TTS error"
@@ -176,10 +224,8 @@ class LFMAudioSynthesizeStream(tts.ChunkedStream):
             sample_rate = tts_instance.SAMPLE_RATE
             num_channels = tts_instance.NUM_CHANNELS
             sample_width = 2
-            raw_data = await self._to_pcm16_bytes(
-                output_path,
-                sample_rate=sample_rate,
-                num_channels=num_channels,
+            raw_data, sample_rate, num_channels = await asyncio.get_event_loop().run_in_executor(
+                None, self._wav_to_pcm16, output_path
             )
 
             # Send audio in chunks (~100ms each for smooth streaming)
@@ -198,6 +244,14 @@ class LFMAudioSynthesizeStream(tts.ChunkedStream):
                 )
 
             for offset in range(0, len(raw_data), chunk_size):
+                # Check for cancellation between chunks so interruptions are responsive
+                try:
+                    if asyncio.current_task().cancelled():
+                        logger.info("TTS streaming cancelled mid-stream")
+                        return
+                except RuntimeError:
+                    pass  # no current task
+
                 chunk_data = raw_data[offset : offset + chunk_size]
                 if output_emitter:
                     output_emitter.push(chunk_data)

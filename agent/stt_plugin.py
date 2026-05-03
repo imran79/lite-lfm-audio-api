@@ -10,9 +10,13 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import math
 import tempfile
 import wave
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 from livekit.agents import stt, utils
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
@@ -54,7 +58,7 @@ class WhisperSTT(stt.STT):
         self._download_root = download_root
         self._language = language
         self._beam_size = beam_size
-        self._model: Optional[object] = None
+        self._model: Optional[WhisperModel] = None
 
     def _ensure_model(self):
         """Lazy-load the Whisper model on first use."""
@@ -95,7 +99,7 @@ class WhisperSTT(stt.STT):
         audio_bytes = frame.data.tobytes()
 
         # Run transcription in a thread pool to avoid blocking the event loop
-        transcript = await asyncio.get_event_loop().run_in_executor(
+        transcript, confidence = await asyncio.get_event_loop().run_in_executor(
             None,
             self._transcribe_sync,
             audio_bytes,
@@ -110,7 +114,7 @@ class WhisperSTT(stt.STT):
                 stt.SpeechData(
                     text=transcript,
                     language=language or self._language,
-                    confidence=1.0,
+                    confidence=confidence,
                 ),
             ],
         )
@@ -121,8 +125,12 @@ class WhisperSTT(stt.STT):
         sample_rate: int,
         num_channels: int,
         language: str | None,
-    ) -> str:
-        """Synchronous transcription (runs in executor thread)."""
+    ) -> tuple[str, float]:
+        """Synchronous transcription (runs in executor thread).
+
+        Returns:
+            Tuple of (transcript_text, confidence_score).
+        """
         model = self._ensure_model()
 
         # Write audio to a temporary WAV file (faster-whisper needs a file path)
@@ -141,8 +149,17 @@ class WhisperSTT(stt.STT):
                 language=language or self._language,
             )
             text = "".join(segment.text for segment in segments).strip()
-            logger.debug("STT result: %s (lang=%s)", text, info.language)
-            return text
+
+            # Extract real confidence from Whisper segment log-probabilities.
+            # avg_logprob is typically in [-3, 0]; we map it to [0.01, 1.0].
+            confidences = []
+            for segment in segments:
+                confidence = max(0.01, min(1.0, math.exp(segment.avg_logprob * 2)))
+                confidences.append(confidence)
+            avg_confidence = sum(confidences) / max(len(confidences), 1) if confidences else 0.5
+
+            logger.debug("STT result: '%s' (lang=%s, confidence=%.3f)", text, info.language, avg_confidence)
+            return text, avg_confidence
         finally:
             import os
             os.unlink(tmp_path)
